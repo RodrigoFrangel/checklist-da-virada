@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checklist Virada 31/12</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Configuração Firebase ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyC-JmKJsLO57cFhrRRMcVIGy0w4qrY2Zwk",
+            authDomain: "festavirada-52bd7.firebaseapp.com",
+            projectId: "festavirada-52bd7",
+            storageBucket: "festavirada-52bd7.firebasestorage.app",
+            messagingSenderId: "1090807200664",
+            appId: "1:1090807200664:web:f3407ffd200301d42209ed",
+            measurementId: "G-JNENCDW2X5"
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        
+        // Estado da Aplicação
+        let currentUser = null; 
+        let selectedPersona = localStorage.getItem('partyPersona') || null; 
+        let partyData = {}; 
+
+        // Definição Inicial dos Dados (Seed)
+        const INITIAL_DATA = {
+            "Rodrigo": {
+                icon: "🍷",
+                items: [
+                    { name: "Chopp de vinho (Draft)", checked: false },
+                    { name: "Spyfall", checked: false },
+                    { name: "Ruffles", checked: false },
+                    { name: "Doritos de pimenta", checked: false }
+                ]
+            },
+            "Karine": {
+                icon: "🌿",
+                items: [
+                    { name: "Chopp de vinho (Draft)", checked: false },
+                    { name: "Maconha", checked: false }
+                ]
+            },
+            "Yuri": {
+                icon: "🎲",
+                items: [
+                    { name: "Velho Barreiro", checked: false },
+                    { name: "Uno", checked: false },
+                    { name: "Jogo da Vida", checked: false },
+                    { name: "Bolo de cenoura", checked: false },
+                    { name: "Ingredientes do guacamole", checked: false }
+                ]
+            },
+            "Rafão": {
+                icon: "🥃",
+                items: [
+                    { name: "Whiskey", checked: false },
+                    { name: "Energético", checked: false },
+                    { name: "Guaraná Zero", checked: false }
+                ]
+            },
+            "Felipe": {
+                icon: "🥤",
+                items: [
+                    { name: "Suco", checked: false },
+                    { name: "Pão de hot dog", checked: false },
+                    { name: "Molho de tomate", checked: false },
+                    { name: "Doces", checked: false }
+                ]
+            },
+            "Zack": {
+                icon: "🌭",
+                items: [
+                    { name: "Salsicha", checked: false },
+                    { name: "Batata palha", checked: false },
+                    { name: "Ketchup", checked: false },
+                    { name: "Maionese", checked: false }
+                ]
+            },
+            "Yumi": {
+                icon: "🥗",
+                items: [
+                    { name: "Ingredientes do purê", checked: false },
+                    { name: "Ingredientes do vinagrete", checked: false }
+                ]
+            }
+        };
+
+        // --- Inicialização ---
+        async function init() {
+            try {
+                // Tenta logar anonimamente
+                await signInAnonymously(auth);
+            } catch (error) {
+                console.error("Erro auth:", error);
+                alert("Erro de autenticação: verifique se o Login Anônimo está ativado no console do Firebase.");
+            }
+            
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    currentUser = user;
+                    setupRealtimeListener();
+                }
+            });
+        }
+
+        // --- Lógica do Firestore ---
+        function getDocRef() {
+            // CORREÇÃO AQUI: Simplifiquei o caminho para apenas 2 segmentos.
+            // Coleção: 'festa'
+            // Documento: 'virada_2025'
+            return doc(db, 'festa', 'virada_2025');
+        }
+
+        async function setupRealtimeListener() {
+            const docRef = getDocRef();
+            
+            try {
+                const docSnap = await getDoc(docRef);
+                
+                // Se for a primeira vez que roda, cria os dados iniciais
+                if (!docSnap.exists()) {
+                    await setDoc(docRef, INITIAL_DATA);
+                }
+
+                // Escuta mudanças em tempo real
+                onSnapshot(docRef, (snapshot) => {
+                    if (snapshot.exists()) {
+                        partyData = snapshot.data();
+                        renderApp();
+                    }
+                }, (error) => {
+                    console.error("Erro listener:", error);
+                    // Se der erro de permissão, avisa o usuário
+                    if (error.code.includes('permission-denied')) {
+                        alert("Erro de permissão: Verifique as regras do Firestore (deixe em Test Mode).");
+                    }
+                });
+            } catch (e) {
+                console.error("Erro setup:", e);
+                if (e.code && e.code.includes('permission-denied')) {
+                    alert("Erro de permissão: Verifique as regras do Firestore.");
+                }
+            }
+        }
+
+        async function toggleItem(personName, itemIndex) {
+            if (personName !== selectedPersona) return;
+
+            const docRef = getDocRef();
+            const newData = JSON.parse(JSON.stringify(partyData));
+            newData[personName].items[itemIndex].checked = !newData[personName].items[itemIndex].checked;
+
+            // Update otimista
+            partyData = newData;
+            renderApp();
+
+            try {
+                await updateDoc(docRef, newData);
+            } catch (e) {
+                console.error("Erro save:", e);
+                alert("Erro ao salvar! Verifique conexão ou permissões.");
+            }
+        }
+
+        // --- Lógica de UI ---
+        
+        function handleLogin() {
+            const select = document.getElementById('user-select');
+            const val = select.value;
+            if (!val) {
+                alert("Selecione quem você é!");
+                return;
+            }
+            selectedPersona = val;
+            localStorage.setItem('partyPersona', selectedPersona);
+            renderApp();
+        }
+
+        function handleLogout() {
+            localStorage.removeItem('partyPersona');
+            selectedPersona = null;
+            renderApp();
+        }
+
+        window.toggleItem = toggleItem;
+        window.handleLogin = handleLogin;
+        window.handleLogout = handleLogout;
+
+        function renderApp() {
+            const appDiv = document.getElementById('app');
+            
+            // 1. Tela de Login
+            if (!selectedPersona) {
+                const names = Object.keys(INITIAL_DATA);
+                appDiv.innerHTML = `
+                    <div class="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-900 text-white relative overflow-hidden">
+                        <div class="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+                            <div class="absolute top-10 left-10 text-6xl">🍷</div>
+                            <div class="absolute bottom-20 right-10 text-6xl">🎇</div>
+                        </div>
+
+                        <div class="z-10 w-full max-w-md bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
+                            <h1 class="text-3xl font-bold text-center mb-2 text-yellow-400">Virada 31/12 🎉</h1>
+                            <p class="text-slate-400 text-center mb-8 text-sm">Organização do rolê</p>
+                            
+                            <label class="block text-sm font-medium mb-2 text-slate-300">Quem é você?</label>
+                            <div class="relative">
+                                <select id="user-select" class="block w-full p-4 bg-slate-700 border border-slate-600 rounded-xl text-white appearance-none focus:ring-2 focus:ring-yellow-500 focus:outline-none transition-all">
+                                    <option value="" disabled selected>Selecione seu nome...</option>
+                                    ${names.map(name => `<option value="${name}">${name}</option>`).join('')}
+                                </select>
+                                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+
+                            <button onclick="handleLogin()" class="mt-6 w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold py-4 rounded-xl shadow-lg transition-transform active:scale-95">
+                                Entrar na Lista
+                            </button>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            // 2. Tela Principal
+            let totalItems = 0;
+            let checkedItems = 0;
+            if (partyData && Object.keys(partyData).length > 0) {
+                Object.values(partyData).forEach(person => {
+                    person.items.forEach(item => {
+                        totalItems++;
+                        if (item.checked) checkedItems++;
+                    });
+                });
+            }
+            const progress = totalItems === 0 ? 0 : Math.round((checkedItems / totalItems) * 100);
+
+            const myData = partyData[selectedPersona];
+            const otherNames = Object.keys(partyData).filter(n => n !== selectedPersona);
+
+            let html = `
+                <div class="min-h-screen bg-slate-900 text-slate-100 pb-20">
+                    <!-- Header -->
+                    <header class="bg-slate-800 border-b border-slate-700 sticky top-0 z-50 shadow-lg">
+                        <div class="max-w-md mx-auto px-4 py-4 flex justify-between items-center">
+                            <div>
+                                <h1 class="font-bold text-lg text-yellow-400">Virada 31/12</h1>
+                                <p class="text-xs text-slate-400 flex items-center gap-1">
+                                    <i class="fas fa-map-marker-alt"></i> Jd. Wanel Ville V
+                                </p>
+                            </div>
+                            <div class="flex items-center gap-3">
+                                <div class="text-right">
+                                    <p class="text-xs text-slate-400">Logado como</p>
+                                    <p class="font-bold text-sm leading-tight">${selectedPersona}</p>
+                                </div>
+                                <button onclick="handleLogout()" class="bg-slate-700 hover:bg-slate-600 p-2 rounded-full text-xs transition-colors">
+                                    <i class="fas fa-sign-out-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="h-1 w-full bg-slate-700">
+                            <div class="h-full bg-gradient-to-r from-yellow-500 to-red-500 transition-all duration-500" style="width: ${progress}%"></div>
+                        </div>
+                    </header>
+
+                    <main class="max-w-md mx-auto p-4 space-y-6">
+                        
+                        <!-- Info Card -->
+                        <div class="bg-slate-800/50 rounded-xl p-4 text-sm border border-slate-700/50 backdrop-blur-sm">
+                            <div class="flex items-start gap-3 mb-2">
+                                <i class="fas fa-clock text-yellow-500 mt-1"></i>
+                                <div>
+                                    <span class="font-bold">Horário:</span> A partir das 19:00
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-3">
+                                <i class="fas fa-home text-yellow-500 mt-1"></i>
+                                <div>
+                                    <span class="font-bold">Local:</span> R. Manoel Vieira Ribeiro Filho, 48
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- MEU CHECKLIST -->
+                        <section>
+                            <h2 class="text-xl font-bold mb-3 flex items-center gap-2">
+                                <span class="bg-yellow-500 text-slate-900 w-8 h-8 rounded-lg flex items-center justify-center text-lg shadow-lg shadow-yellow-500/20">
+                                    ${myData ? (myData.icon || '👤') : '👤'}
+                                </span>
+                                Seu Checklist
+                            </h2>
+                            <div class="space-y-3">
+                                ${myData ? myData.items.map((item, index) => `
+                                    <div 
+                                        onclick="toggleItem('${selectedPersona}', ${index})"
+                                        class="cursor-pointer group relative overflow-hidden bg-slate-800 hover:bg-slate-750 border-2 ${item.checked ? 'border-green-500/50 bg-green-900/10' : 'border-slate-700'} rounded-xl p-4 transition-all duration-200 active:scale-[0.98]"
+                                    >
+                                        <div class="flex items-center gap-4">
+                                            <div class="flex-shrink-0 w-6 h-6 rounded-full border-2 ${item.checked ? 'bg-green-500 border-green-500' : 'border-slate-500 group-hover:border-yellow-400'} flex items-center justify-center transition-colors">
+                                                ${item.checked ? '<i class="fas fa-check text-slate-900 text-xs"></i>' : ''}
+                                            </div>
+                                            <span class="text-lg ${item.checked ? 'text-slate-400 line-through' : 'text-slate-100 font-medium'}">
+                                                ${item.name}
+                                            </span>
+                                        </div>
+                                    </div>
+                                `).join('') : '<p class="text-slate-500">Carregando...</p>'}
+                            </div>
+                        </section>
+
+                        <hr class="border-slate-800 my-6">
+
+                        <!-- OUTROS -->
+                        <section class="opacity-90">
+                            <h3 class="text-sm uppercase tracking-wider text-slate-500 font-bold mb-4">O que os outros estão trazendo</h3>
+                            
+                            <div class="grid gap-4">
+                                ${otherNames.map(name => {
+                                    const person = partyData[name];
+                                    if (!person) return '';
+                                    const allChecked = person.items.every(i => i.checked);
+                                    
+                                    return `
+                                    <div class="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+                                        <div class="bg-slate-800/80 p-3 flex items-center justify-between border-b border-slate-700/50">
+                                            <div class="flex items-center gap-2 font-bold text-slate-300">
+                                                <span>${person.icon || '👤'}</span>
+                                                ${name}
+                                            </div>
+                                            ${allChecked 
+                                                ? '<span class="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded-full font-bold">Tudo pronto!</span>' 
+                                                : '<span class="text-xs bg-slate-700 text-slate-400 px-2 py-1 rounded-full">Pendente</span>'}
+                                        </div>
+                                        <div class="p-3 space-y-2">
+                                            ${person.items.map(item => `
+                                                <div class="flex items-center gap-3 text-sm text-slate-400">
+                                                    <i class="fas ${item.checked ? 'fa-check-circle text-green-500' : 'fa-circle text-slate-600'}"></i>
+                                                    <span class="${item.checked ? 'line-through opacity-50' : ''}">${item.name}</span>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </section>
+                    </main>
+                </div>
+            `;
+            
+            appDiv.innerHTML = html;
+        }
+
+        init();
+    </script>
+</head>
+<body class="bg-slate-900 text-slate-100 antialiased selection:bg-yellow-500 selection:text-slate-900">
+    <div id="app">
+        <!-- Loading State -->
+        <div class="h-screen w-full flex flex-col items-center justify-center gap-4">
+            <div class="w-12 h-12 border-4 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-slate-400 animate-pulse">Carregando lista da festa...</p>
+        </div>
+    </div>
+</body>
+</html>
